@@ -1,80 +1,62 @@
-import React, { useState, useCallback } from 'react';
-import CustomerView from './components/CustomerView';
-import type { BlacklistedSong } from './types';
-import { getFunFact } from './services/geminiService';
+// Update your App.tsx handleRequestSong function with the correct URL:
 
-const App: React.FC = () => {
-  // State for customer view feedback
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [geminiFact, setGeminiFact] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+const handleRequestSong = useCallback(async (title: string, artist: string) => {
+  clearMessages();
+  setIsLoading(true);
 
-  // Note: Blacklist needs to come from your admin system
-  // For now, this is empty - you'll connect this to your backend later
-  const [blacklist] = useState<BlacklistedSong[]>([]);
+  const songId = generateSongId(title, artist);
 
-  const clearMessages = useCallback(() => {
-    setGeminiFact(null);
-    setError(null);
-  }, []);
-  
-  const generateSongId = (title: string, artist: string) => {
-    return `${artist.toLowerCase().trim().replace(/\s+/g, '-')}-${title.toLowerCase().trim().replace(/\s+/g, '-')}`;
-  };
+  // Check blacklist
+  if (blacklist.some(song => song.id === songId)) {
+    setError(`"${title}" is not available for request.`);
+    setIsLoading(false);
+    return;
+  }
 
-  const handleRequestSong = useCallback(async (title: string, artist: string) => {
-    clearMessages();
-    setIsLoading(true);
+  try {
+    // Use your actual admin dashboard URL
+    const ADMIN_API_URL = import.meta.env.VITE_ADMIN_API_URL || 'https://the-cowboy-band-manager-test-3.vercel.app';
+    const VENUE_ID = import.meta.env.VITE_VENUE_ID || 'cowboy-saloon-main';
+    
+    console.log('Sending request to:', `${ADMIN_API_URL}/api/dj/requests`);
+    
+    const response = await fetch(`${ADMIN_API_URL}/api/dj/requests`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        title,
+        artist,
+        songId,
+        venue: VENUE_ID,
+        timestamp: new Date().toISOString(),
+        source: 'customer_interface'
+      })
+    });
 
-    const songId = generateSongId(title, artist);
+    console.log('Response status:', response.status);
 
-    // Check blacklist
-    if (blacklist.some(song => song.id === songId)) {
-        setError(`"${title}" is not available for request.`);
-        setIsLoading(false);
-        return;
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(`Request failed: ${response.status} - ${errorData.error || 'Unknown error'}`);
     }
 
-    try {
-      // TODO: Send request to your backend/database instead of localStorage
-      // For now, we'll just simulate the request being sent
-      console.log('Song request:', { title, artist, songId });
-      
+    const result = await response.json();
+    console.log('Success response:', result);
+    
+    if (result.success) {
       // Fetch fun fact while processing the request
       const fact = await getFunFact(title, artist);
-      setGeminiFact(fact);
-    } catch (error) {
-      setError('Failed to submit request. Please try again.');
-    } finally {
-      setIsLoading(false);
+      setGeminiFact(fact || `Your request for "${title}" by ${artist} has been sent to the DJ!`);
+    } else {
+      throw new Error(result.message || 'Request failed');
     }
-  }, [blacklist, clearMessages]);
-
-  return (
-    <div className="min-h-screen p-4 sm:p-6 md:p-8 bg-gradient-to-br from-slate-900 to-slate-800">
-      <header className="text-center mb-8">
-        <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-pink-500">
-          The Cowboy Saloon
-        </h1>
-        <p className="text-slate-300 mt-2 text-lg">Request your favorite songs!</p>
-      </header>
-
-      <main>
-        <CustomerView 
-          handleRequestSong={handleRequestSong} 
-          blacklist={blacklist}
-          isLoading={isLoading}
-          geminiFact={geminiFact}
-          error={error}
-          clearMessages={clearMessages}
-        />
-      </main>
-      
-      <footer className="text-center text-slate-500 mt-12 text-sm">
-        <p>Powered by React, Tailwind, and Gemini</p>
-      </footer>
-    </div>
-  );
-};
-
-export default App;
+    
+  } catch (error) {
+    console.error('Request submission error:', error);
+    setError('Failed to submit request. Please try again.');
+  } finally {
+    setIsLoading(false);
+  }
+}, [blacklist, clearMessages]);
