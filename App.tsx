@@ -1,7 +1,6 @@
 // Updated App.tsx for customer interface
 import React, { useState, useCallback } from 'react';
 import CustomerView from './components/CustomerView';
-import type { BlacklistedSong } from './types';
 import { getFunFact } from './services/geminiService';
 
 const App: React.FC = () => {
@@ -9,10 +8,6 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [geminiFact, setGeminiFact] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  // Note: Blacklist needs to come from your admin system
-  // For now, this is empty - you'll connect this to your backend later
-  const [blacklist] = useState<BlacklistedSong[]>([]);
 
   const clearMessages = useCallback(() => {
     setGeminiFact(null);
@@ -29,33 +24,28 @@ const App: React.FC = () => {
 
     const songId = generateSongId(title, artist);
 
-    // Check blacklist
-    if (blacklist.some(song => song.id === songId)) {
-      setError(`"${title}" is not available for request.`);
-      setIsLoading(false);
-      return;
-    }
-
     try {
-      // Use your actual admin dashboard URL
-      const ADMIN_API_URL = import.meta.env.VITE_ADMIN_API_URL || 'https://the-cowboy-band-manager-test-3.vercel.app';
-      const VENUE_ID = import.meta.env.VITE_VENUE_ID || 'cowboy-saloon-main';
+      // Use your n8n webhook directly
+      const N8N_WEBHOOK_URL = 'https://thayneautomations.app.n8n.cloud/webhook/dj';
+      const VENUE_ID = 'cowboy-saloon-main';
       
-      const requestUrl = `${ADMIN_API_URL}/api/dj/requests`;
-      console.log('Sending request to:', requestUrl);
+      console.log('Sending request to n8n webhook:', N8N_WEBHOOK_URL);
       
       const requestPayload = {
-        title,
-        artist,
-        songId,
-        venue: VENUE_ID,
-        timestamp: new Date().toISOString(),
-        source: 'customer_interface'
+        action: 'requests.add',
+        data: {
+          songId,
+          title,
+          artist,
+          venue: VENUE_ID,
+          timestamp: new Date().toISOString(),
+          requestCount: 1
+        }
       };
       
       console.log('Request payload:', requestPayload);
       
-      const response = await fetch(requestUrl, {
+      const response = await fetch(N8N_WEBHOOK_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -64,22 +54,11 @@ const App: React.FC = () => {
       });
 
       console.log('Response status:', response.status);
-      console.log('Response headers:', Object.fromEntries(response.headers.entries()));
 
       if (!response.ok) {
         const errorText = await response.text();
         console.error('Error response:', errorText);
-        
-        let errorMessage = `Request failed with status ${response.status}`;
-        try {
-          const errorData = JSON.parse(errorText);
-          errorMessage = errorData.error || errorData.message || errorMessage;
-        } catch (e) {
-          // If we can't parse the error as JSON, use the raw text
-          errorMessage = errorText || errorMessage;
-        }
-        
-        throw new Error(errorMessage);
+        throw new Error(`Request failed with status ${response.status}`);
       }
 
       const result = await response.json();
@@ -95,7 +74,11 @@ const App: React.FC = () => {
           setGeminiFact(`Your request for "${title}" by ${artist} has been sent to the DJ!`);
         }
       } else {
-        throw new Error(result.message || 'Request failed - server returned unsuccessful response');
+        // Handle n8n specific error responses
+        if (result.error && result.error.includes('blacklist')) {
+          throw new Error(`"${title}" is not available for request.`);
+        }
+        throw new Error(result.message || result.error || 'Request failed');
       }
       
     } catch (error) {
@@ -114,7 +97,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [blacklist, clearMessages]);
+  }, [clearMessages]);
 
   return (
     <div className="min-h-screen p-4 sm:p-6 md:p-8 bg-gradient-to-br from-slate-900 to-slate-800">
@@ -128,7 +111,6 @@ const App: React.FC = () => {
       <main>
         <CustomerView 
           handleRequestSong={handleRequestSong} 
-          blacklist={blacklist}
           isLoading={isLoading}
           geminiFact={geminiFact}
           error={error}
