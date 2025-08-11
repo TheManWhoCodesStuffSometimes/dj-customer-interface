@@ -12,11 +12,8 @@ export interface CooldownSong {
   cooldownUntil: number; // Timestamp
 }
 
-export interface BlacklistedSong {
-  id: string; // "artist-title"
-  title: string;
-  artist: string;
-}
+// Removed BlacklistedSong interface since we don't need it in customer interface
+// n8n will handle blacklist checking
 
 export interface MusicBrainzSong {
   id: string; // MBID from MusicBrainz
