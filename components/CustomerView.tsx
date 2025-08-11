@@ -1,28 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import MusicIcon from './icons/MusicIcon';
 import { searchSongs } from '../services/musicbrainzService';
-import type { MusicBrainzSong, BlacklistedSong } from '../types';
+import type { MusicBrainzSong } from '../types';
 
 interface CustomerViewProps {
   handleRequestSong: (title: string, artist: string) => Promise<void>;
-  blacklist: BlacklistedSong[];
   isLoading: boolean;
   geminiFact: string | null;
   error: string | null;
   clearMessages: () => void;
 }
 
-const CustomerView: React.FC<CustomerViewProps> = ({ handleRequestSong, blacklist, isLoading, geminiFact, error, clearMessages }) => {
+const CustomerView: React.FC<CustomerViewProps> = ({ 
+  handleRequestSong, 
+  isLoading, 
+  geminiFact, 
+  error, 
+  clearMessages 
+}) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MusicBrainzSong[]>([]);
   const [selectedSong, setSelectedSong] = useState<MusicBrainzSong | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchBy, setSearchBy] = useState<'song' | 'artist'>('song');
-
-  const generateSongId = (title: string, artist: string): string => {
-    return `${artist.toLowerCase().trim().replace(/\s+/g, '-')}-${title.toLowerCase().trim().replace(/\s+/g, '-')}`;
-  };
 
   // Debounced search effect
   useEffect(() => {
@@ -40,12 +41,8 @@ const CustomerView: React.FC<CustomerViewProps> = ({ handleRequestSong, blacklis
       setSearchError(null);
       try {
         const songs = await searchSongs(query, searchBy);
-        // Filter out blacklisted songs before showing them to the user. [5, 8]
-        const filteredSongs = songs.filter(song => {
-            const songId = generateSongId(song.title, song.artist);
-            return !blacklist.some(blacklistedSong => blacklistedSong.id === songId);
-        });
-        setResults(filteredSongs);
+        // No need to filter blacklist here - n8n will handle it
+        setResults(songs);
       } catch (err) {
         setSearchError('Could not fetch song results. Please try again.');
         setResults([]);
@@ -55,8 +52,7 @@ const CustomerView: React.FC<CustomerViewProps> = ({ handleRequestSong, blacklis
     }, 300); // 300ms debounce timer
 
     return () => clearTimeout(debounceSearch);
-  }, [query, selectedSong, searchBy, blacklist]);
-
+  }, [query, selectedSong, searchBy]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,24 +68,28 @@ const CustomerView: React.FC<CustomerViewProps> = ({ handleRequestSong, blacklis
     const trimmedQuery = query.trim();
     if (!trimmedQuery) return;
 
-    // Try to parse "Artist - Title"
+    // Try to parse "Artist - Title" or "Title - Artist"
     const parts = trimmedQuery.split(' - ');
-    const artist = parts.length > 1 ? parts.pop()?.trim() || '' : 'Unknown Artist';
-    const title = parts.join(' - ').trim();
-
-    const songId = generateSongId(title, artist);
-    if (blacklist.some(s => s.id === songId)) {
-        setSearchError(`"${title}" is not available for request.`);
-        return;
+    let artist = '';
+    let title = '';
+    
+    if (parts.length > 1) {
+      // If there's a dash, assume format is "Title - Artist"
+      title = parts[0].trim();
+      artist = parts.slice(1).join(' - ').trim();
+    } else {
+      // No dash, treat as title with unknown artist
+      title = trimmedQuery;
+      artist = 'Unknown Artist';
     }
 
     if (title) {
-        handleRequestSong(title, artist);
-        setQuery('');
-        setSelectedSong(null);
-        setResults([]);
+      handleRequestSong(title, artist);
+      setQuery('');
+      setSelectedSong(null);
+      setResults([]);
     } else {
-        setSearchError("Please enter a song title to request.");
+      setSearchError("Please enter a song title to request.");
     }
   };
   
@@ -123,7 +123,7 @@ const CustomerView: React.FC<CustomerViewProps> = ({ handleRequestSong, blacklis
             <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-2xl p-8 text-center shadow-lg shadow-cyan-500/10">
                 {error ? (
                     <>
-                        <h3 className="text-xl font-bold text-red-400 mb-4">Request Blocked</h3>
+                        <h3 className="text-xl font-bold text-red-400 mb-4">Request Status</h3>
                         <p className="text-slate-300">{error}</p>
                     </>
                 ) : (
@@ -142,7 +142,6 @@ const CustomerView: React.FC<CustomerViewProps> = ({ handleRequestSong, blacklis
         </div>
     );
   }
-
 
   return (
     <div className="w-full max-w-md mx-auto animate-fade-in">
