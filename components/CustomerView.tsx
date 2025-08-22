@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import MusicIcon from './icons/MusicIcon';
-import { searchSongs } from '../services/musicbrainzService';
+import { enhancedSearchSongs } from '../services/enhancedSearchService';
 import type { MusicBrainzSong } from '../types';
 
 interface RateLimitState {
@@ -37,10 +37,10 @@ const CustomerView: React.FC<CustomerViewProps> = ({
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchBy, setSearchBy] = useState<'song' | 'artist'>('song');
 
-  // Debounced search effect
+  // Debounced search effect - now requires minimum 3 characters
   useEffect(() => {
-    // Don't search if the query is empty or if it matches the selected song
-    if (!query || (selectedSong && `${selectedSong.title} - ${selectedSong.artist}` === query)) {
+    // Don't search if query is too short, empty, or matches selected song
+    if (!query || query.trim().length < 3 || (selectedSong && `${selectedSong.title} - ${selectedSong.artist}` === query)) {
       setResults([]);
       return;
     }
@@ -52,7 +52,7 @@ const CustomerView: React.FC<CustomerViewProps> = ({
       setIsSearching(true);
       setSearchError(null);
       try {
-        const songs = await searchSongs(query, searchBy);
+        const songs = await enhancedSearchSongs(query, searchBy);
         // No need to filter blacklist here - n8n will handle it
         setResults(songs);
       } catch (err) {
