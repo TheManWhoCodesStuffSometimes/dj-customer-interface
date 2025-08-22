@@ -3,12 +3,23 @@ import MusicIcon from './icons/MusicIcon';
 import { searchSongs } from '../services/musicbrainzService';
 import type { MusicBrainzSong } from '../types';
 
+interface RateLimitState {
+  canRequest: boolean;
+  isInCooldown: boolean;
+  timeUntilNextRequest: number;
+  requestCount: number;
+  getRemainingFreeRequests: () => number;
+  getNextCooldownDuration: () => number;
+  formatTimeRemaining: (milliseconds: number) => string;
+}
+
 interface CustomerViewProps {
   handleRequestSong: (title: string, artist: string) => Promise<void>;
   isLoading: boolean;
   geminiFact: string | null;
   error: string | null;
   clearMessages: () => void;
+  rateLimitState: RateLimitState;
 }
 
 const CustomerView: React.FC<CustomerViewProps> = ({ 
@@ -16,7 +27,8 @@ const CustomerView: React.FC<CustomerViewProps> = ({
   isLoading, 
   geminiFact, 
   error, 
-  clearMessages 
+  clearMessages,
+  rateLimitState
 }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MusicBrainzSong[]>([]);
@@ -56,7 +68,7 @@ const CustomerView: React.FC<CustomerViewProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (selectedSong) {
+    if (selectedSong && rateLimitState.canRequest) {
       handleRequestSong(selectedSong.title, selectedSong.artist);
       setQuery('');
       setSelectedSong(null);
@@ -66,7 +78,7 @@ const CustomerView: React.FC<CustomerViewProps> = ({
   
   const handleManualSubmit = () => {
     const trimmedQuery = query.trim();
-    if (!trimmedQuery) return;
+    if (!trimmedQuery || !rateLimitState.canRequest) return;
 
     // Try to parse "Artist - Title" or "Title - Artist"
     const parts = trimmedQuery.split(' - ');
@@ -117,6 +129,29 @@ const CustomerView: React.FC<CustomerViewProps> = ({
     setSelectedSong(null);
   };
 
+  // Rate limiting display helpers
+  const getRateLimitMessage = () => {
+    const remainingFree = rateLimitState.getRemainingFreeRequests();
+    
+    if (rateLimitState.isInCooldown) {
+      return `Next request available in ${rateLimitState.formatTimeRemaining(rateLimitState.timeUntilNextRequest)}`;
+    }
+    
+    if (remainingFree > 0) {
+      return `${remainingFree} free request${remainingFree === 1 ? '' : 's'} remaining`;
+    }
+    
+    const nextCooldown = rateLimitState.getNextCooldownDuration();
+    if (nextCooldown > 0) {
+      const cooldownText = nextCooldown === 30000 ? '30 seconds' : 
+                          nextCooldown === 60000 ? '1 minute' : 
+                          '5 minutes';
+      return `Next request will have a ${cooldownText} cooldown`;
+    }
+    
+    return '';
+  };
+
   if (geminiFact || error) {
     return (
         <div className="w-full max-w-md mx-auto animate-fade-in">
@@ -132,11 +167,28 @@ const CustomerView: React.FC<CustomerViewProps> = ({
                         <p className="text-slate-300 italic">"{geminiFact}"</p>
                     </>
                 )}
+                
+                {/* Rate limit info */}
+                <div className="mt-6 p-3 bg-slate-900/50 rounded-lg border border-slate-600">
+                    <p className="text-sm text-slate-400">
+                        Requests made: {rateLimitState.requestCount}
+                    </p>
+                    {getRateLimitMessage() && (
+                        <p className="text-sm text-cyan-400 mt-1">
+                            {getRateLimitMessage()}
+                        </p>
+                    )}
+                </div>
+
                 <button
                     onClick={handleNewRequest}
-                    className="mt-8 w-full bg-cyan-500 hover:bg-cyan-400 text-slate-900 font-bold py-3 px-4 rounded-lg transition-all duration-300 transform hover:scale-105"
+                    disabled={rateLimitState.isInCooldown}
+                    className="mt-8 w-full bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 disabled:cursor-not-allowed text-slate-900 font-bold py-3 px-4 rounded-lg transition-all duration-300 transform hover:scale-105"
                 >
-                    Request Another Song
+                    {rateLimitState.isInCooldown 
+                        ? `Wait ${rateLimitState.formatTimeRemaining(rateLimitState.timeUntilNextRequest)}`
+                        : 'Request Another Song'
+                    }
                 </button>
             </div>
         </div>
@@ -150,6 +202,19 @@ const CustomerView: React.FC<CustomerViewProps> = ({
             <MusicIcon className="w-12 h-12 mx-auto text-cyan-400 mb-2"/>
             <h2 className="text-3xl font-bold tracking-tight">Request a Song</h2>
             <p className="text-slate-400 mt-1">Let the DJ know what you want to hear!</p>
+        </div>
+
+        {/* Rate Limit Display */}
+        <div className="bg-slate-900/50 p-3 rounded-lg border border-slate-600">
+            <div className="flex justify-between items-center text-sm">
+                <span className="text-slate-400">Requests made:</span>
+                <span className="text-cyan-400 font-semibold">{rateLimitState.requestCount}</span>
+            </div>
+            {getRateLimitMessage() && (
+                <p className="text-xs text-slate-500 mt-1 text-center">
+                    {getRateLimitMessage()}
+                </p>
+            )}
         </div>
 
         <div>
@@ -206,7 +271,7 @@ const CustomerView: React.FC<CustomerViewProps> = ({
         
         <button
           type="submit"
-          disabled={isLoading || isSearching || !selectedSong}
+          disabled={isLoading || isSearching || !selectedSong || !rateLimitState.canRequest}
           className="w-full bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-600 disabled:cursor-not-allowed text-slate-900 font-bold py-3 px-4 rounded-lg transition-all duration-300 transform hover:scale-105 flex items-center justify-center space-x-2"
         >
           {isLoading ? (
@@ -214,19 +279,21 @@ const CustomerView: React.FC<CustomerViewProps> = ({
                 <div className="w-5 h-5 border-2 border-t-transparent border-white rounded-full animate-spin"></div>
                 <span>Submitting...</span>
             </>
+          ) : rateLimitState.isInCooldown ? (
+            <span>Wait {rateLimitState.formatTimeRemaining(rateLimitState.timeUntilNextRequest)}</span>
           ) : (
             <span>Send Request</span>
           )}
         </button>
 
         {/* Manual submit button */}
-        {query && !isSearching && !selectedSong && results.length === 0 && (
+        {query && !isSearching && !selectedSong && results.length === 0 && rateLimitState.canRequest && (
             <div className="text-center pt-2">
                 <p className="text-slate-400 text-sm mb-2">Can't find it? Request what you typed.</p>
                  <button
                     type="button"
                     onClick={handleManualSubmit}
-                    disabled={isLoading}
+                    disabled={isLoading || !rateLimitState.canRequest}
                     className="w-full bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:cursor-not-allowed text-slate-200 font-bold py-2 px-4 rounded-lg transition-colors duration-300"
                 >
                     Request "{query}"
