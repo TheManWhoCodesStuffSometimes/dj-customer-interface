@@ -1,13 +1,17 @@
-// Updated App.tsx for customer interface
+// Updated App.tsx for customer interface with rate limiting
 import React, { useState, useCallback } from 'react';
 import CustomerView from './components/CustomerView';
 import { getFunFact } from './services/geminiService';
+import { useRateLimit } from './hooks/useRateLimit';
 
 const App: React.FC = () => {
   // State for customer view feedback
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [geminiFact, setGeminiFact] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Rate limiting hook
+  const rateLimitState = useRateLimit();
 
   const clearMessages = useCallback(() => {
     setGeminiFact(null);
@@ -19,14 +23,25 @@ const App: React.FC = () => {
   };
 
   const handleRequestSong = useCallback(async (title: string, artist: string) => {
+    // Check rate limiting before proceeding
+    if (!rateLimitState.canRequest) {
+      setError(`Please wait ${rateLimitState.formatTimeRemaining(rateLimitState.timeUntilNextRequest)} before requesting another song.`);
+      return;
+    }
+
     clearMessages();
     setIsLoading(true);
 
     const songId = generateSongId(title, artist);
 
     try {
-      // Use your n8n webhook directly
-      const N8N_WEBHOOK_URL = 'https://thayneautomations.app.n8n.cloud/webhook/dj';
+      // Use environment variable for webhook URL
+      const N8N_WEBHOOK_URL = import.meta.env.VITE_N8N_WEBHOOK_URL;
+      
+      if (!N8N_WEBHOOK_URL) {
+        throw new Error('Service configuration error. Please contact support.');
+      }
+
       const VENUE_ID = 'cowboy-saloon-main';
       
       console.log('Sending request to n8n webhook:', N8N_WEBHOOK_URL);
@@ -65,6 +80,9 @@ const App: React.FC = () => {
       console.log('Success response:', result);
       
       if (result.success) {
+        // Record the successful request for rate limiting
+        rateLimitState.recordRequest();
+
         // Fetch fun fact while processing the request
         try {
           const fact = await getFunFact(title, artist);
@@ -97,7 +115,7 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [clearMessages]);
+  }, [clearMessages, rateLimitState]);
 
   return (
     <div className="min-h-screen p-4 sm:p-6 md:p-8 bg-gradient-to-br from-slate-900 to-slate-800">
@@ -115,6 +133,7 @@ const App: React.FC = () => {
           geminiFact={geminiFact}
           error={error}
           clearMessages={clearMessages}
+          rateLimitState={rateLimitState}
         />
       </main>
       
